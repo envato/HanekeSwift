@@ -67,7 +67,9 @@ public class Cache<T: DataConvertible where T.Result == T, T : DataRepresentable
                 let wrapper = ObjectWrapper(value: formattedValue)
                 memoryCache.setObject(wrapper, forKey: key)
                 // Value data is sent as @autoclosure to be executed in the disk cache queue.
-                diskCache.setData(self.dataFromValue(formattedValue, format: format), key: key)
+                // VV: nah, don't execute that on disk cache queue to avoid crashes
+                let data = self.dataFromValue(formattedValue, format: format)
+                diskCache.setData(data, key: key)
                 succeed?(formattedValue)
             }
         } else {
@@ -196,17 +198,14 @@ public class Cache<T: DataConvertible where T.Result == T, T : DataRepresentable
                 }
             }
         }) { data in
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), {
-                let value = T.convertFromData(data)
-                if let value = value {
-                    let descompressedValue = self.decompressedImageIfNeeded(value)
-                    dispatch_async(dispatch_get_main_queue(), {
-                        succeed(descompressedValue)
-                        let wrapper = ObjectWrapper(value: descompressedValue)
-                        memoryCache.setObject(wrapper, forKey: key)
-                    })
-                }
-            })
+            // VV: moved convertFromData/decompressedImageIfNeeded to main thread to avoid crashes
+            let value = T.convertFromData(data)
+            if let value = value {
+                let descompressedValue = self.decompressedImageIfNeeded(value)
+                succeed(descompressedValue)
+                let wrapper = ObjectWrapper(value: descompressedValue)
+                memoryCache.setObject(wrapper, forKey: key)
+            }
         }
     }
     
@@ -223,20 +222,17 @@ public class Cache<T: DataConvertible where T.Result == T, T : DataRepresentable
         if format.isIdentity && !(value is UIImage) {
             succeed(value)
         } else {
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)) {
-                var formatted = format.apply(value)
-                
-                if let formattedImage = formatted as? UIImage {
-                    let originalImage = value as? UIImage
-                    if formattedImage === originalImage {
-                        formatted = self.decompressedImageIfNeeded(formatted)
-                    }
-                }
-                
-                dispatch_async(dispatch_get_main_queue()) {
-                    succeed(formatted)
+            // VV: do not apply format on background queue to avoid crashes
+            var formatted = format.apply(value)
+            
+            if let formattedImage = formatted as? UIImage {
+                let originalImage = value as? UIImage
+                if formattedImage === originalImage {
+                    formatted = self.decompressedImageIfNeeded(formatted)
                 }
             }
+            
+            succeed(formatted)
         }
     }
     

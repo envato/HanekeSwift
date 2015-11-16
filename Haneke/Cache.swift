@@ -158,6 +158,11 @@ public class Cache<T: DataConvertible where T.Result == T, T : DataRepresentable
         self.formats[name] = (format, memoryCache, diskCache)
     }
     
+    // VV: this should've been there all along
+    public func formatWithName(name: String) -> Format<T>? {
+        return self.formats[name]?.0
+    }
+    
     // MARK: Internal
     
     lazy var cachePath: String = {
